@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/anthdm/hollywood/actor"
+	"github.com/karanshergill/ctlogger/pkg/db"
 	"github.com/karanshergill/ctlogger/pkg/utils"
 	ct "github.com/google/certificate-transparency-go"
 	"github.com/google/certificate-transparency-go/x509"
@@ -51,6 +52,7 @@ type Runner struct {
 	actorPID       *actor.PID
 	useActor       bool
 	actorEngine    *actor.Engine
+	database       *db.Database
 }
 
 func (r *Runner) loadRootDomains() error {
@@ -169,6 +171,12 @@ func NewRunner(options *Options) (*Runner, error) {
 		}
 	}
 
+	// Initialize database
+	runner.database, err = db.NewDatabase("ctlogs.db")
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize database: %v", err)
+	}
+
 	runner.entryTasksChan = make(chan types.EntryTask, len(runner.logClients)*100)
 	runner.rateLimitMap = defaultRateLimitMap
 
@@ -204,7 +212,12 @@ func (r *Runner) Run() {
 	if r.watcher != nil {
 		r.watcher.Close()
 	}
-	r.natsConn.Close()
+	if r.natsConn != nil {
+		r.natsConn.Close()
+	}
+	if r.database != nil {
+		r.database.Close()
+	}
 	fmt.Fprintf(os.Stderr, "Gracefully shutdown all routines\n")
 }
 
@@ -488,6 +501,11 @@ func (r *Runner) logCertInfo(entry *ct.RawLogEntry) {
 					log.Printf("Error writing to file for %s: %v", parsedEntry.X509Cert.Subject.CommonName, err)
 				}
 			}
+			if err := r.database.InsertDomain(parsedEntry.X509Cert.Subject.CommonName); err != nil {
+				if r.options.Verbose {
+					log.Printf("Error writing to database for %s: %v", parsedEntry.X509Cert.Subject.CommonName, err)
+				}
+			}
 		}
 
 		// Handle DNS names
@@ -497,14 +515,29 @@ func (r *Runner) logCertInfo(entry *ct.RawLogEntry) {
 					log.Printf("Error writing to file for %s: %v", domain, err)
 				}
 			}
+			if err := r.database.InsertDomain(domain); err != nil {
+				if r.options.Verbose {
+					log.Printf("Error writing to database for %s: %v", domain, err)
+				}
+			}
 		}
 	} else if r.useActor {
 		if utils.IsSubdomain(parsedEntry.X509Cert.Subject.CommonName, r.rootDomains) {
 			r.actorEngine.Send(r.actorPID, &types.CTLoggerMessage{Domain: parsedEntry.X509Cert.Subject.CommonName})
+			if err := r.database.InsertDomain(parsedEntry.X509Cert.Subject.CommonName); err != nil {
+				if r.options.Verbose {
+					log.Printf("Error writing to database for %s: %v", parsedEntry.X509Cert.Subject.CommonName, err)
+				}
+			}
 		}
 		for _, domain := range parsedEntry.X509Cert.DNSNames {
 			if utils.IsSubdomain(domain, r.rootDomains) {
 				r.actorEngine.Send(r.actorPID, &types.CTLoggerMessage{Domain: domain})
+				if err := r.database.InsertDomain(domain); err != nil {
+					if r.options.Verbose {
+						log.Printf("Error writing to database for %s: %v", domain, err)
+					}
+				}
 			}
 		}
 	} else if r.natsPub {
@@ -513,12 +546,22 @@ func (r *Runner) logCertInfo(entry *ct.RawLogEntry) {
 			if err != nil {
 				log.Printf("Error writing to NATs: %v", err)
 			}
+			if err := r.database.InsertDomain(parsedEntry.X509Cert.Subject.CommonName); err != nil {
+				if r.options.Verbose {
+					log.Printf("Error writing to database for %s: %v", parsedEntry.X509Cert.Subject.CommonName, err)
+				}
+			}
 		}
 		for _, domain := range parsedEntry.X509Cert.DNSNames {
 			if utils.IsSubdomain(domain, r.rootDomains) {
 				err := r.natsConn.Publish(r.options.NatsSubject, []byte(domain))
 				if err != nil {
 					log.Printf("Error writing to NATs: %v", err)
+				}
+				if err := r.database.InsertDomain(domain); err != nil {
+					if r.options.Verbose {
+						log.Printf("Error writing to database for %s: %v", domain, err)
+					}
 				}
 			}
 		}
@@ -533,12 +576,30 @@ func (r *Runner) logCertInfo(entry *ct.RawLogEntry) {
 					fmt.Println(domain)
 				}
 			}
+			// Write to database regardless of filtering
+			if err := r.database.InsertDomain(parsedEntry.X509Cert.Subject.CommonName); err != nil {
+				if r.options.Verbose {
+					log.Printf("Error writing to database for %s: %v", parsedEntry.X509Cert.Subject.CommonName, err)
+				}
+			}
+			for _, domain := range parsedEntry.X509Cert.DNSNames {
+				if err := r.database.InsertDomain(domain); err != nil {
+					if r.options.Verbose {
+						log.Printf("Error writing to database for %s: %v", domain, err)
+					}
+				}
+			}
 		} else {
 			if utils.IsSubdomain(parsedEntry.X509Cert.Subject.CommonName, r.rootDomains) {
 				if r.options.JsonOutput {
 					utils.JsonOutput(parsedEntry.X509Cert)
 				} else {
 					fmt.Println(parsedEntry.X509Cert.Subject.CommonName)
+				}
+				if err := r.database.InsertDomain(parsedEntry.X509Cert.Subject.CommonName); err != nil {
+					if r.options.Verbose {
+						log.Printf("Error writing to database for %s: %v", parsedEntry.X509Cert.Subject.CommonName, err)
+					}
 				}
 			}
 			for _, domain := range parsedEntry.X509Cert.DNSNames {
@@ -547,6 +608,11 @@ func (r *Runner) logCertInfo(entry *ct.RawLogEntry) {
 						utils.JsonOutput(parsedEntry.X509Cert)
 					} else {
 						fmt.Println(domain)
+					}
+					if err := r.database.InsertDomain(domain); err != nil {
+						if r.options.Verbose {
+							log.Printf("Error writing to database for %s: %v", domain, err)
+						}
 					}
 				}
 			}
@@ -570,6 +636,11 @@ func (r *Runner) logPrecertInfo(entry *ct.RawLogEntry) {
 					log.Printf("Error writing to file for %s: %v", parsedEntry.Precert.TBSCertificate.Subject.CommonName, err)
 				}
 			}
+			if err := r.database.InsertDomain(parsedEntry.Precert.TBSCertificate.Subject.CommonName); err != nil {
+				if r.options.Verbose {
+					log.Printf("Error writing to database for %s: %v", parsedEntry.Precert.TBSCertificate.Subject.CommonName, err)
+				}
+			}
 		}
 
 		// Handle DNS names
@@ -579,14 +650,29 @@ func (r *Runner) logPrecertInfo(entry *ct.RawLogEntry) {
 					log.Printf("Error writing to file for %s: %v", domain, err)
 				}
 			}
+			if err := r.database.InsertDomain(domain); err != nil {
+				if r.options.Verbose {
+					log.Printf("Error writing to database for %s: %v", domain, err)
+				}
+			}
 		}
 	} else if r.useActor {
 		if utils.IsSubdomain(parsedEntry.Precert.TBSCertificate.Subject.CommonName, r.rootDomains) {
 			r.actorEngine.Send(r.actorPID, &types.CTLoggerMessage{Domain: parsedEntry.Precert.TBSCertificate.Subject.CommonName})
+			if err := r.database.InsertDomain(parsedEntry.Precert.TBSCertificate.Subject.CommonName); err != nil {
+				if r.options.Verbose {
+					log.Printf("Error writing to database for %s: %v", parsedEntry.Precert.TBSCertificate.Subject.CommonName, err)
+				}
+			}
 		}
 		for _, domain := range parsedEntry.Precert.TBSCertificate.DNSNames {
 			if utils.IsSubdomain(domain, r.rootDomains) {
 				r.actorEngine.Send(r.actorPID, &types.CTLoggerMessage{Domain: domain})
+				if err := r.database.InsertDomain(domain); err != nil {
+					if r.options.Verbose {
+						log.Printf("Error writing to database for %s: %v", domain, err)
+					}
+				}
 			}
 		}
 	} else if r.natsPub {
@@ -595,12 +681,22 @@ func (r *Runner) logPrecertInfo(entry *ct.RawLogEntry) {
 			if err != nil {
 				log.Printf("Error writing to NATs: %v", err)
 			}
+			if err := r.database.InsertDomain(parsedEntry.Precert.TBSCertificate.Subject.CommonName); err != nil {
+				if r.options.Verbose {
+					log.Printf("Error writing to database for %s: %v", parsedEntry.Precert.TBSCertificate.Subject.CommonName, err)
+				}
+			}
 		}
 		for _, domain := range parsedEntry.Precert.TBSCertificate.DNSNames {
 			if utils.IsSubdomain(domain, r.rootDomains) {
 				err := r.natsConn.Publish(r.options.NatsSubject, []byte(domain))
 				if err != nil {
 					log.Printf("Error writing to NATs: %v", err)
+				}
+				if err := r.database.InsertDomain(domain); err != nil {
+					if r.options.Verbose {
+						log.Printf("Error writing to database for %s: %v", domain, err)
+					}
 				}
 			}
 		}
@@ -615,12 +711,30 @@ func (r *Runner) logPrecertInfo(entry *ct.RawLogEntry) {
 					fmt.Println(domain)
 				}
 			}
+			// Write to database regardless of filtering
+			if err := r.database.InsertDomain(parsedEntry.Precert.TBSCertificate.Subject.CommonName); err != nil {
+				if r.options.Verbose {
+					log.Printf("Error writing to database for %s: %v", parsedEntry.Precert.TBSCertificate.Subject.CommonName, err)
+				}
+			}
+			for _, domain := range parsedEntry.Precert.TBSCertificate.DNSNames {
+				if err := r.database.InsertDomain(domain); err != nil {
+					if r.options.Verbose {
+						log.Printf("Error writing to database for %s: %v", domain, err)
+					}
+				}
+			}
 		} else {
 			if utils.IsSubdomain(parsedEntry.Precert.TBSCertificate.Subject.CommonName, r.rootDomains) {
 				if r.options.JsonOutput {
 					utils.JsonOutput(parsedEntry.Precert.TBSCertificate)
 				} else {
 					fmt.Println(parsedEntry.Precert.TBSCertificate.Subject.CommonName)
+				}
+				if err := r.database.InsertDomain(parsedEntry.Precert.TBSCertificate.Subject.CommonName); err != nil {
+					if r.options.Verbose {
+						log.Printf("Error writing to database for %s: %v", parsedEntry.Precert.TBSCertificate.Subject.CommonName, err)
+					}
 				}
 			}
 			for _, domain := range parsedEntry.Precert.TBSCertificate.DNSNames {
@@ -629,6 +743,11 @@ func (r *Runner) logPrecertInfo(entry *ct.RawLogEntry) {
 						utils.JsonOutput(parsedEntry.Precert.TBSCertificate)
 					} else {
 						fmt.Println(domain)
+					}
+					if err := r.database.InsertDomain(domain); err != nil {
+						if r.options.Verbose {
+							log.Printf("Error writing to database for %s: %v", domain, err)
+						}
 					}
 				}
 			}
