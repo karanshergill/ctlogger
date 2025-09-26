@@ -19,6 +19,8 @@ type Options struct {
 	NatsCredFile string
 	ActorPID     *actor.PID
 	ActorEngine  *actor.Engine
+	Daemon       bool
+	PidFile      string
 }
 
 func ParseOptions() (*Options, error) {
@@ -33,6 +35,8 @@ func ParseOptions() (*Options, error) {
 	flag.StringVar(&options.NatsSubject, "ns", "", "NATs subject to publish domains to")
 	flag.StringVar(&options.NatsUrl, "nu", "", "NATs URL to publish domains to")
 	flag.StringVar(&options.NatsCredFile, "nc", "", "NATs subject to publish domains to")
+	flag.BoolVar(&options.Daemon, "daemon", false, "Run as daemon in background")
+	flag.StringVar(&options.PidFile, "pidfile", "/tmp/ctlogger.pid", "PID file path for daemon mode")
 	flag.Parse()
 
 	// Validate that output directory is only used with root list
