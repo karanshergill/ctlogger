@@ -19,7 +19,7 @@ CTLogger is designed to be a lightweight and efficient tool, making it suitable 
 ## Installation
 
 ```sh
-go install github.com/karanshergill/ctlogger/cmd/ctlogger@latest
+go install github.com/karanshergill/ctlogger/cmd@latest
 ```
 
 ## Usage
