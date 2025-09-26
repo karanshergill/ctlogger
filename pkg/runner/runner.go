@@ -390,7 +390,7 @@ func (r *Runner) processEntries(results *ct.GetEntriesResponse, start int64) {
 			if r.options.Verbose {
 				fmt.Fprintf(os.Stderr, "Failed to get parse entry %d: %v", index, err)
 			}
-			break
+			continue
 		}
 
 		switch entryType := rle.Leaf.TimestampedEntry.EntryType; entryType {
@@ -501,9 +501,11 @@ func (r *Runner) logCertInfo(entry *ct.RawLogEntry) {
 					log.Printf("Error writing to file for %s: %v", parsedEntry.X509Cert.Subject.CommonName, err)
 				}
 			}
-			if err := r.database.InsertDomain(parsedEntry.X509Cert.Subject.CommonName); err != nil {
-				if r.options.Verbose {
-					log.Printf("Error writing to database for %s: %v", parsedEntry.X509Cert.Subject.CommonName, err)
+			if utils.IsSubdomain(parsedEntry.X509Cert.Subject.CommonName, r.rootDomains) {
+				if err := r.database.InsertDomain(parsedEntry.X509Cert.Subject.CommonName); err != nil {
+					if r.options.Verbose {
+						log.Printf("Error writing to database for %s: %v", parsedEntry.X509Cert.Subject.CommonName, err)
+					}
 				}
 			}
 		}
@@ -515,9 +517,11 @@ func (r *Runner) logCertInfo(entry *ct.RawLogEntry) {
 					log.Printf("Error writing to file for %s: %v", domain, err)
 				}
 			}
-			if err := r.database.InsertDomain(domain); err != nil {
-				if r.options.Verbose {
-					log.Printf("Error writing to database for %s: %v", domain, err)
+			if utils.IsSubdomain(domain, r.rootDomains) {
+				if err := r.database.InsertDomain(domain); err != nil {
+					if r.options.Verbose {
+						log.Printf("Error writing to database for %s: %v", domain, err)
+					}
 				}
 			}
 		}
@@ -636,9 +640,11 @@ func (r *Runner) logPrecertInfo(entry *ct.RawLogEntry) {
 					log.Printf("Error writing to file for %s: %v", parsedEntry.Precert.TBSCertificate.Subject.CommonName, err)
 				}
 			}
-			if err := r.database.InsertDomain(parsedEntry.Precert.TBSCertificate.Subject.CommonName); err != nil {
-				if r.options.Verbose {
-					log.Printf("Error writing to database for %s: %v", parsedEntry.Precert.TBSCertificate.Subject.CommonName, err)
+			if utils.IsSubdomain(parsedEntry.Precert.TBSCertificate.Subject.CommonName, r.rootDomains) {
+				if err := r.database.InsertDomain(parsedEntry.Precert.TBSCertificate.Subject.CommonName); err != nil {
+					if r.options.Verbose {
+						log.Printf("Error writing to database for %s: %v", parsedEntry.Precert.TBSCertificate.Subject.CommonName, err)
+					}
 				}
 			}
 		}
@@ -650,9 +656,11 @@ func (r *Runner) logPrecertInfo(entry *ct.RawLogEntry) {
 					log.Printf("Error writing to file for %s: %v", domain, err)
 				}
 			}
-			if err := r.database.InsertDomain(domain); err != nil {
-				if r.options.Verbose {
-					log.Printf("Error writing to database for %s: %v", domain, err)
+			if utils.IsSubdomain(domain, r.rootDomains) {
+				if err := r.database.InsertDomain(domain); err != nil {
+					if r.options.Verbose {
+						log.Printf("Error writing to database for %s: %v", domain, err)
+					}
 				}
 			}
 		}
